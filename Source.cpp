@@ -7,6 +7,13 @@
 #define BTN_START_REC 1
 #define BTN_STOP_REC 2
 #define BTN_SET_HOTKEY 3
+#define BTN_TOGGLE_AIM 4
+#define RAD_CROSS 5
+#define RAD_DOT 6
+#define RAD_CIRCLE 7
+#define BTN_SIZE_MINUS 8
+#define BTN_SIZE_PLUS 9
+#define RAD_T_CROSS 10
 
 struct UserKeyAction {
     WORD vKey;
@@ -23,6 +30,9 @@ bool bIsCapturing = false;
 bool bAwaitingHotkey = false;
 DWORD activationKey = 0;
 ULONGLONG previousTick = 0;
+
+int crossType = 0;
+int crossSize = 30;
 
 void ExecuteMacro() {
     if (savedActions.empty()) return;
@@ -72,12 +82,27 @@ LRESULT CALLBACK LowLevelKeyHandler(int nCode, WPARAM wParam, LPARAM lParam) {
 
 LRESULT CALLBACK MainInterfaceHandler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
-    case WM_CREATE:
+    case WM_CREATE: {
         CreateWindowW(L"STATIC", L"--- МАКРОСИ ---", WS_VISIBLE | WS_CHILD | SS_CENTER, 10, 10, 280, 20, hwnd, NULL, NULL, NULL);
         CreateWindowW(L"BUTTON", L"🔴 Почати запис", WS_VISIBLE | WS_CHILD, 60, 40, 180, 30, hwnd, (HMENU)BTN_START_REC, NULL, NULL);
         CreateWindowW(L"BUTTON", L"⬛ Зупинити запис", WS_VISIBLE | WS_CHILD, 60, 80, 180, 30, hwnd, (HMENU)BTN_STOP_REC, NULL, NULL);
         CreateWindowW(L"BUTTON", L"Призначити клавішу (Бінд)", WS_VISIBLE | WS_CHILD, 50, 120, 200, 30, hwnd, (HMENU)BTN_SET_HOTKEY, NULL, NULL);
+
+        CreateWindowW(L"STATIC", L"--- ПЕРЕХРЕСТЯ ---", WS_VISIBLE | WS_CHILD | SS_CENTER, 10, 170, 280, 20, hwnd, NULL, NULL, NULL);
+
+        HWND hRad1 = CreateWindowW(L"BUTTON", L"Хрест (центр)", WS_VISIBLE | WS_CHILD | BS_AUTORADIOBUTTON | WS_GROUP, 25, 195, 120, 20, hwnd, (HMENU)RAD_CROSS, NULL, NULL);
+        CreateWindowW(L"BUTTON", L"Без верху", WS_VISIBLE | WS_CHILD | BS_AUTORADIOBUTTON, 155, 195, 120, 20, hwnd, (HMENU)RAD_T_CROSS, NULL, NULL);
+        CreateWindowW(L"BUTTON", L"Крапка", WS_VISIBLE | WS_CHILD | BS_AUTORADIOBUTTON, 25, 220, 120, 20, hwnd, (HMENU)RAD_DOT, NULL, NULL);
+        CreateWindowW(L"BUTTON", L"Коло", WS_VISIBLE | WS_CHILD | BS_AUTORADIOBUTTON, 155, 220, 120, 20, hwnd, (HMENU)RAD_CIRCLE, NULL, NULL);
+
+        SendMessage(hRad1, BM_SETCHECK, BST_CHECKED, 0);
+
+        CreateWindowW(L"BUTTON", L"- Зменшити", WS_VISIBLE | WS_CHILD, 40, 255, 100, 30, hwnd, (HMENU)BTN_SIZE_MINUS, NULL, NULL);
+        CreateWindowW(L"BUTTON", L"+ Збільшити", WS_VISIBLE | WS_CHILD, 160, 255, 100, 30, hwnd, (HMENU)BTN_SIZE_PLUS, NULL, NULL);
+
+        CreateWindowW(L"BUTTON", L"👁 Показати/Сховати приціл", WS_VISIBLE | WS_CHILD, 50, 300, 200, 30, hwnd, (HMENU)BTN_TOGGLE_AIM, NULL, NULL);
         break;
+    }
 
     case WM_CTLCOLORSTATIC: {
         HDC hdcStatic = (HDC)wParam;
@@ -101,6 +126,24 @@ LRESULT CALLBACK MainInterfaceHandler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         case BTN_SET_HOTKEY:
             bAwaitingHotkey = true;
             SetWindowTextW(GetDlgItem(hwnd, BTN_SET_HOTKEY), L"Натисніть клавішу...");
+            break;
+        case RAD_CROSS:
+            crossType = 0;
+            break;
+        case RAD_DOT:
+            crossType = 1;
+            break;
+        case RAD_CIRCLE:
+            crossType = 2;
+            break;
+        case RAD_T_CROSS:
+            crossType = 3;
+            break;
+        case BTN_SIZE_MINUS:
+            if (crossSize > 10) crossSize -= 10;
+            break;
+        case BTN_SIZE_PLUS:
+            if (crossSize < 180) crossSize += 10;
             break;
         }
         break;
