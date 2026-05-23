@@ -8,8 +8,67 @@
 #define BTN_STOP_REC 2
 #define BTN_SET_HOTKEY 3
 
+struct UserKeyAction {
+    WORD vKey;
+    DWORD keyFlags;
+    DWORD waitTimeMs;
+};
+
 HWND hPrimaryWnd = NULL;
+HHOOK hGlobalKeyHook = NULL;
 HBRUSH hDarkThemeBrush = NULL;
+
+std::vector<UserKeyAction> savedActions;
+bool bIsCapturing = false;
+bool bAwaitingHotkey = false;
+DWORD activationKey = 0;
+ULONGLONG previousTick = 0;
+
+void ExecuteMacro() {
+    if (savedActions.empty()) return;
+
+    for (const auto& action : savedActions) {
+        Sleep(action.waitTimeMs);
+
+        INPUT simInput = { 0 };
+        simInput.type = INPUT_KEYBOARD;
+        simInput.ki.wVk = action.vKey;
+        simInput.ki.dwFlags = action.keyFlags;
+
+        SendInput(1, &simInput, sizeof(INPUT));
+    }
+}
+
+LRESULT CALLBACK LowLevelKeyHandler(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode == HC_ACTION) {
+        KBDLLHOOKSTRUCT* pKeyData = (KBDLLHOOKSTRUCT*)lParam;
+
+        if (bAwaitingHotkey && wParam == WM_KEYDOWN) {
+            activationKey = pKeyData->vkCode;
+            bAwaitingHotkey = false;
+            SetWindowTextW(GetDlgItem(hPrimaryWnd, BTN_SET_HOTKEY), L"Клавіша призначена!");
+            return 1;
+        }
+
+        if (bIsCapturing) {
+            ULONGLONG currentTick = GetTickCount64();
+            DWORD delay = (previousTick == 0) ? 0 : (DWORD)(currentTick - previousTick);
+            previousTick = currentTick;
+
+            UserKeyAction newAction;
+            newAction.vKey = (WORD)pKeyData->vkCode;
+            newAction.keyFlags = (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) ? KEYEVENTF_KEYUP : 0;
+            newAction.waitTimeMs = delay;
+
+            savedActions.push_back(newAction);
+        }
+
+        if (!bIsCapturing && !bAwaitingHotkey && pKeyData->vkCode == activationKey && wParam == WM_KEYDOWN) {
+            std::thread(ExecuteMacro).detach();
+        }
+    }
+    return CallNextHookEx(hGlobalKeyHook, nCode, wParam, lParam);
+}
 
 LRESULT CALLBACK MainInterfaceHandler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
@@ -30,12 +89,17 @@ LRESULT CALLBACK MainInterfaceHandler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case BTN_START_REC:
+            savedActions.clear();
+            previousTick = 0;
+            bIsCapturing = true;
             SetWindowTextW(hwnd, L"Інструменти Гравця [ЙДЕ ЗАПИС...]");
             break;
         case BTN_STOP_REC:
+            bIsCapturing = false;
             SetWindowTextW(hwnd, L"Інструменти Гравця [Записано]");
             break;
         case BTN_SET_HOTKEY:
+            bAwaitingHotkey = true;
             SetWindowTextW(GetDlgItem(hwnd, BTN_SET_HOTKEY), L"Натисніть клавішу...");
             break;
         }
@@ -65,12 +129,16 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
     ShowWindow(hPrimaryWnd, nCmdShow);
 
+    hGlobalKeyHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyHandler, hInstance, 0);
+
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
 
+    UnhookWindowsHookEx(hGlobalKeyHook);
     DeleteObject(hDarkThemeBrush);
+
     return 0;
 }
