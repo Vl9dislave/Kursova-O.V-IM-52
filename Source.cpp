@@ -22,6 +22,7 @@ struct UserKeyAction {
 };
 
 HWND hPrimaryWnd = NULL;
+HWND hOverlayWnd = NULL;
 HHOOK hGlobalKeyHook = NULL;
 HBRUSH hDarkThemeBrush = NULL;
 
@@ -80,6 +81,69 @@ LRESULT CALLBACK LowLevelKeyHandler(int nCode, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(hGlobalKeyHook, nCode, wParam, lParam);
 }
 
+LRESULT CALLBACK OverlayWindowHandler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (uMsg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+
+        HPEN hPen = CreatePen(PS_SOLID, 2, RGB(0, 255, 0));
+        HBRUSH hBrush = CreateSolidBrush(RGB(0, 255, 0));
+
+        HGDIOBJ hOldPen = SelectObject(hdc, hPen);
+        HGDIOBJ hOldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+
+        int cx = 100;
+        int cy = 100;
+        int r = crossSize / 2;
+        int gap = max(2, r / 3);
+
+        if (crossType == 0 || crossType == 3) {
+            MoveToEx(hdc, cx - r, cy, NULL); LineTo(hdc, cx - gap, cy);
+            MoveToEx(hdc, cx + gap, cy, NULL); LineTo(hdc, cx + r, cy);
+            MoveToEx(hdc, cx, cy + gap, NULL); LineTo(hdc, cx, cy + r);
+            if (crossType == 0) {
+                MoveToEx(hdc, cx, cy - r, NULL); LineTo(hdc, cx, cy - gap);
+            }
+        }
+        else if (crossType == 1) {
+            SelectObject(hdc, hBrush);
+            int dotR = max(2, r / 2);
+            Ellipse(hdc, cx - dotR, cy - dotR, cx + dotR, cy + dotR);
+        }
+        else if (crossType == 2) {
+            Ellipse(hdc, cx - r, cy - r, cx + r, cy + r);
+        }
+
+        SelectObject(hdc, hOldBrush);
+        SelectObject(hdc, hOldPen);
+        DeleteObject(hPen);
+        DeleteObject(hBrush);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+void SwitchCrosshairState() {
+    if (hOverlayWnd) {
+        DestroyWindow(hOverlayWnd);
+        hOverlayWnd = NULL;
+    }
+    else {
+        int screenW = GetSystemMetrics(SM_CXSCREEN);
+        int screenH = GetSystemMetrics(SM_CYSCREEN);
+
+        hOverlayWnd = CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+            L"OverlayClass", L"", WS_POPUP | WS_VISIBLE,
+            (screenW - 200) / 2, (screenH - 200) / 2, 200, 200,
+            NULL, NULL, GetModuleHandle(NULL), NULL
+        );
+        SetLayeredWindowAttributes(hOverlayWnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
+    }
+}
+
 LRESULT CALLBACK MainInterfaceHandler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_CREATE: {
@@ -127,23 +191,32 @@ LRESULT CALLBACK MainInterfaceHandler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
             bAwaitingHotkey = true;
             SetWindowTextW(GetDlgItem(hwnd, BTN_SET_HOTKEY), L"Натисніть клавішу...");
             break;
+        case BTN_TOGGLE_AIM:
+            SwitchCrosshairState();
+            break;
         case RAD_CROSS:
             crossType = 0;
+            if (hOverlayWnd) InvalidateRect(hOverlayWnd, NULL, TRUE);
             break;
         case RAD_DOT:
             crossType = 1;
+            if (hOverlayWnd) InvalidateRect(hOverlayWnd, NULL, TRUE);
             break;
         case RAD_CIRCLE:
             crossType = 2;
+            if (hOverlayWnd) InvalidateRect(hOverlayWnd, NULL, TRUE);
             break;
         case RAD_T_CROSS:
             crossType = 3;
+            if (hOverlayWnd) InvalidateRect(hOverlayWnd, NULL, TRUE);
             break;
         case BTN_SIZE_MINUS:
             if (crossSize > 10) crossSize -= 10;
+            if (hOverlayWnd) InvalidateRect(hOverlayWnd, NULL, TRUE);
             break;
         case BTN_SIZE_PLUS:
             if (crossSize < 180) crossSize += 10;
+            if (hOverlayWnd) InvalidateRect(hOverlayWnd, NULL, TRUE);
             break;
         }
         break;
@@ -156,7 +229,15 @@ LRESULT CALLBACK MainInterfaceHandler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
 }
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nCmdShow) {
+
     hDarkThemeBrush = CreateSolidBrush(RGB(15, 15, 30));
+
+    WNDCLASSW overlayClass = { 0 };
+    overlayClass.lpfnWndProc = OverlayWindowHandler;
+    overlayClass.hInstance = hInstance;
+    overlayClass.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    overlayClass.lpszClassName = L"OverlayClass";
+    RegisterClassW(&overlayClass);
 
     WNDCLASSW mainWndClass = { 0 };
     mainWndClass.lpfnWndProc = MainInterfaceHandler;
